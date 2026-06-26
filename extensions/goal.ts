@@ -874,14 +874,13 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		const sessionId = ctx.sessionManager?.getSessionId?.() ?? "";
 		setSessionScope(sessionSettings.sessionScope === true, sessionId);
 
-		goalsById = readActiveGoalPool(ctx);
-		focusedGoalId = null;
+		// Read session entries to find legacy goal data before reading goal files
 		let focusEntry: GoalFocusEntry | null = null;
 		let legacyGoal: GoalRecord | null = null;
 		let legacyStateSeen = false;
-		const entries = ctx.sessionManager.getBranch();
-		for (let i = entries.length - 1; i >= 0; i--) {
-			const entry = entries[i] as { type?: string; customType?: string; data?: unknown };
+		const branchEntries = ctx.sessionManager.getBranch();
+		for (let i = branchEntries.length - 1; i >= 0; i--) {
+			const entry = branchEntries[i] as { type?: string; customType?: string; data?: unknown };
 			if (entry.type !== "custom") continue;
 			if (!focusEntry && entry.customType === FOCUS_ENTRY) {
 				focusEntry = normalizeGoalFocusEntry(entry.data);
@@ -892,6 +891,16 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			}
 			if (focusEntry && legacyStateSeen) break;
 		}
+
+		// Read goal files from disk (shared or session-scoped)
+		goalsById = readActiveGoalPool(ctx);
+		focusedGoalId = null;
+
+		// If session-scoped and no goal files found, restore from session entries
+		if (goalsById.size === 0 && sessionSettings.sessionScope && legacyGoal && legacyGoal.status !== "complete") {
+			goalsById.set(legacyGoal.id, legacyGoal);
+		}
+
 		if (legacyGoal && legacyGoal.status !== "complete") {
 			legacyGoal = sanitizeGoalPaths(ctx, mergeGoalPromptFromDisk(ctx, legacyGoal));
 		}

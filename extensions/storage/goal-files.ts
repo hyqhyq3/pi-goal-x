@@ -18,6 +18,47 @@ import {
 
 export const GOALS_DIR = ".pi/goals";
 export const ARCHIVED_GOALS_DIR = ".pi/goals/archived";
+export const SESSION_GOALS_DIR = ".pi/sessions";
+
+/** Global sessionScope override, set by goal.ts on loadState. */
+let _sessionScope = false;
+let _sessionId = "";
+
+/**
+ * Called by goal.ts to activate session-scoped storage when enabled in settings.
+ */
+export function setSessionScope(enabled: boolean, sessionId: string): void {
+	_sessionScope = enabled;
+	_sessionId = sessionId;
+}
+
+/**
+ * Whether session-scoped storage is currently active.
+ */
+export function isSessionScoped(): boolean {
+	return _sessionScope && _sessionId.length > 0;
+}
+
+/**
+ * Resolve the effective goals base directory.
+ * When sessionScope is enabled, store goals under .pi/sessions/<session-id>/goals/.
+ */
+export function goalsBaseDir(): string {
+	if (_sessionScope && _sessionId) {
+		return `${SESSION_GOALS_DIR}/${safeIdPart(_sessionId)}/goals`;
+	}
+	return GOALS_DIR;
+}
+
+/**
+ * Resolve the effective archived goals base directory.
+ */
+export function archivedGoalsBaseDir(): string {
+	if (_sessionScope && _sessionId) {
+		return `${SESSION_GOALS_DIR}/${safeIdPart(_sessionId)}/goals/archived`;
+	}
+	return ARCHIVED_GOALS_DIR;
+}
 
 export interface GoalFileContext {
 	cwd: string;
@@ -38,6 +79,14 @@ export function timestampForFile(iso = nowIso()): string {
 	].join("");
 }
 
+export function goalsRelDir(_ctx: GoalFileContext): string {
+	return goalsBaseDir();
+}
+
+export function archivedGoalsRelDir(_ctx: GoalFileContext): string {
+	return archivedGoalsBaseDir();
+}
+
 export function isSafeRelativeUnder(ctx: GoalFileContext, rootRel: string, relPath: string | undefined): relPath is string {
 	if (!relPath || path.isAbsolute(relPath) || relPath.includes("\0")) return false;
 	const normalized = normalizeRelPath(relPath);
@@ -50,15 +99,17 @@ export function isSafeRelativeUnder(ctx: GoalFileContext, rootRel: string, relPa
 }
 
 export function isSafeActivePath(ctx: GoalFileContext, relPath: string | undefined): relPath is string {
+	const dir = goalsRelDir(ctx);
 	return Boolean(
-		isSafeRelativeUnder(ctx, GOALS_DIR, relPath)
+		isSafeRelativeUnder(ctx, dir, relPath)
 			&& /^active_goal_.*\.md$/.test(path.posix.basename(normalizeRelPath(relPath))),
 	);
 }
 
 export function isSafeArchivedPath(ctx: GoalFileContext, relPath: string | undefined): relPath is string {
+	const dir = archivedGoalsRelDir(ctx);
 	return Boolean(
-		isSafeRelativeUnder(ctx, ARCHIVED_GOALS_DIR, relPath)
+		isSafeRelativeUnder(ctx, dir, relPath)
 			&& /^goal_.*\.md$/.test(path.posix.basename(normalizeRelPath(relPath))),
 	);
 }
@@ -101,11 +152,13 @@ export function safeUnlinkGoalFile(ctx: GoalFileContext, rootRel: string, relPat
 }
 
 export function makeActiveGoalPath(goal: GoalRecord): string {
-	return `${GOALS_DIR}/active_goal_${timestampForFile(goal.createdAt)}_${safeIdPart(goal.id)}.md`;
+	const dir = goalsBaseDir();
+	return `${dir}/active_goal_${timestampForFile(goal.createdAt)}_${safeIdPart(goal.id)}.md`;
 }
 
 export function makeArchivedGoalPath(goal: GoalRecord): string {
-	return `${ARCHIVED_GOALS_DIR}/goal_${timestampForFile(goal.updatedAt)}_${safeIdPart(goal.id)}.md`;
+	const dir = archivedGoalsBaseDir();
+	return `${dir}/goal_${timestampForFile(goal.updatedAt)}_${safeIdPart(goal.id)}.md`;
 }
 
 export function activePathForGoal(ctx: GoalFileContext, goal: GoalRecord): string {
@@ -233,7 +286,8 @@ export function parseGoalFile(filePath: string): GoalRecord | null {
 export function writeActiveGoalFile(ctx: GoalFileContext, current: GoalRecord): GoalRecord {
 	const activePath = activePathForGoal(ctx, current);
 	const next = sanitizeGoalPaths(ctx, { ...current, activePath, updatedAt: nowIso() });
-	atomicWriteGoalFile(ctx, GOALS_DIR, activePath, serializeGoalFile(next));
+	const dir = goalsRelDir(ctx);
+	atomicWriteGoalFile(ctx, dir, activePath, serializeGoalFile(next));
 	return next;
 }
 
@@ -241,10 +295,12 @@ export function archiveGoalFile(ctx: GoalFileContext, current: GoalRecord): Goal
 	const archivedPath = archivedPathForGoal(ctx, current);
 	const next = sanitizeGoalPaths(ctx, { ...current, archivedPath, updatedAt: nowIso() });
 	delete next.activePath;
-	atomicWriteGoalFile(ctx, ARCHIVED_GOALS_DIR, archivedPath, serializeGoalFile(next));
+	const dir = archivedGoalsRelDir(ctx);
+	atomicWriteGoalFile(ctx, dir, archivedPath, serializeGoalFile(next));
 	if (isSafeActivePath(ctx, current.activePath)) {
 		try {
-			safeUnlinkGoalFile(ctx, GOALS_DIR, current.activePath);
+			const activeDir = goalsRelDir(ctx);
+			safeUnlinkGoalFile(ctx, activeDir, current.activePath);
 		} catch {}
 	}
 	return next;
@@ -253,7 +309,8 @@ export function archiveGoalFile(ctx: GoalFileContext, current: GoalRecord): Goal
 export function mergeGoalPromptFromDisk(ctx: GoalFileContext, current: GoalRecord): GoalRecord {
 	if (!isSafeActivePath(ctx, current.activePath)) return current;
 	try {
-		const parsed = parseGoalFile(resolveGoalPath(ctx, GOALS_DIR, current.activePath));
+		const dir = goalsRelDir(ctx);
+		const parsed = parseGoalFile(resolveGoalPath(ctx, dir, current.activePath));
 		if (!parsed) return current;
 		return { ...current, objective: parsed.objective };
 	} catch {
@@ -262,7 +319,8 @@ export function mergeGoalPromptFromDisk(ctx: GoalFileContext, current: GoalRecor
 }
 
 export function readActiveGoalFiles(ctx: GoalFileContext): GoalRecord[] {
-	const root = path.resolve(ctx.cwd, GOALS_DIR);
+	const dir = goalsRelDir(ctx);
+	const root = path.resolve(ctx.cwd, dir);
 	let entries: string[];
 	try {
 		if (fs.lstatSync(root).isSymbolicLink()) return [];
@@ -274,9 +332,9 @@ export function readActiveGoalFiles(ctx: GoalFileContext): GoalRecord[] {
 		.filter((name) => /^active_goal_.*\.md$/.test(name))
 		.sort((a, b) => a.localeCompare(b))
 		.map((name) => {
-			const relPath = `${GOALS_DIR}/${name}`;
+			const relPath = `${dir}/${name}`;
 			if (!isSafeActivePath(ctx, relPath)) return null;
-			const parsed = parseGoalFile(resolveGoalPath(ctx, GOALS_DIR, relPath));
+			const parsed = parseGoalFile(resolveGoalPath(ctx, dir, relPath));
 			if (!parsed || parsed.status === "complete") return null;
 			return sanitizeGoalPaths(ctx, { ...parsed, activePath: relPath });
 		})

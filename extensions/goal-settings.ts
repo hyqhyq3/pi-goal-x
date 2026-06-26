@@ -26,6 +26,7 @@ export interface GoalSettings {
 	model?: string;
 	thinkingLevel?: ThinkingLevel;
 	disabled?: boolean;
+	sessionScope?: boolean;
 }
 
 export const PI_GOAL_SETTINGS_FILE_ENV = "PI_GOAL_SETTINGS_FILE";
@@ -41,6 +42,7 @@ const ALLOWED_SETTINGS_KEYS = new Set([
 	"thinkingLevel",
 	"thinking_level",
 	"disabled",
+	"sessionScope",
 ]);
 
 /**
@@ -98,12 +100,14 @@ export function parseGoalSettings(raw: unknown): GoalSettings {
 	const provider = asNonEmptyString(record.provider);
 	const model = asNonEmptyString(record.model);
 	const thinkingLevel = asThinkingLevel(record.thinkingLevel ?? record.thinking_level);
+	const sessionScope = asBool(record.sessionScope);
 	if (disableTasks !== undefined) settings.disableTasks = disableTasks;
 	if (disableContracts !== undefined) settings.disableContracts = disableContracts;
 	if (subtaskDepth !== undefined) settings.subtaskDepth = subtaskDepth;
 	if (provider !== undefined) settings.provider = provider;
 	if (model !== undefined) settings.model = model;
 	if (thinkingLevel !== undefined) settings.thinkingLevel = thinkingLevel;
+	if (sessionScope !== undefined) settings.sessionScope = sessionScope;
 	if (record.disabled === true || record.disabled === "true") settings.disabled = true;
 	return settings;
 }
@@ -136,6 +140,7 @@ export function loadGoalSettings(cwd: string, env: NodeJS.ProcessEnv = process.e
 		model: fileConfig.model,
 		thinkingLevel: fileConfig.thinkingLevel,
 		disabled: fileConfig.disabled,
+		sessionScope: fileConfig.sessionScope,
 	};
 }
 
@@ -159,6 +164,7 @@ export function saveGoalSettingsFileConfig(cwd: string, settings: GoalSettings):
 	const disableTasks = asBool(settings.disableTasks);
 	const disableContracts = asBool(settings.disableContracts);
 	const subtaskDepth = asPositiveInt(settings.subtaskDepth);
+	const sessionScope = asBool(settings.sessionScope);
 	if (provider) clean.provider = provider;
 	if (model) clean.model = model;
 	if (thinkingLevel) clean.thinkingLevel = thinkingLevel;
@@ -166,6 +172,7 @@ export function saveGoalSettingsFileConfig(cwd: string, settings: GoalSettings):
 	if (disableTasks === true) clean.disableTasks = true;
 	if (disableContracts === true) clean.disableContracts = true;
 	if (subtaskDepth !== undefined) clean.subtaskDepth = subtaskDepth;
+	if (sessionScope === true) clean.sessionScope = true;
 	const configPath = goalSettingsPath(cwd);
 	fs.mkdirSync(path.dirname(configPath), { recursive: true });
 	const persisted: Record<string, unknown> = {};
@@ -176,6 +183,7 @@ export function saveGoalSettingsFileConfig(cwd: string, settings: GoalSettings):
 	if (clean.disableTasks) persisted.disableTasks = true;
 	if (clean.disableContracts) persisted.disableContracts = true;
 	if (clean.subtaskDepth !== undefined) persisted.subtaskDepth = clean.subtaskDepth;
+	if (clean.sessionScope) persisted.sessionScope = true;
 	fs.writeFileSync(configPath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
 	return clean;
 }

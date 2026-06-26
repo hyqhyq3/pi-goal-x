@@ -89,6 +89,7 @@ import {
 	safeUnlinkGoalFile,
 	sanitizeGoalPaths,
 	serializeGoalFile,
+	setSessionScope,
 	writeActiveGoalFile,
 } from "./storage/goal-files.ts";
 import {
@@ -869,6 +870,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	}
 
 	function loadState(ctx: ExtensionContext): void {
+		const sessionSettings = loadGoalSettings(ctx.cwd);
+		const sessionId = ctx.sessionManager?.getSessionId?.() ?? "";
+		setSessionScope(sessionSettings.sessionScope === true, sessionId);
+
 		goalsById = readActiveGoalPool(ctx);
 		focusedGoalId = null;
 		let focusEntry: GoalFocusEntry | null = null;
